@@ -1,26 +1,37 @@
 defmodule Bobochacha.SessionProcess do
   alias Bobochacha.SessionConfig
-  use GenServer
+  use GenServer, restart: :temporary
+
+  def start_link(_) do
+    GenServer.start_link(__MODULE__, %{})
+  end
 
   def init(config) do
     set_up_voice(config[:voice_channel])
     # This initial timer signal would kick off the pomo timer.
+    {:ok, {:on_break, 0, config}, {:continue, :finish_init}}
+  end
+
+  def terminate(:cycles_finished, %SessionConfig{voice_channel: voice_channel}),
+    do: clean_up(voice_channel)
+
+  def handle_continue(:finish_init, state) do
     ping_myself_after(0)
-    {:on_break, 0, config}
+    {:no_reply, {state}}
   end
 
   def handle_cast(
         :timer,
-        {:on_break, iterations_elapsed,
-         %SessionConfig{
-           text_channel: text_channel,
-           voice_channel: voice_channel,
-           cycles_to_run: iterations_elapsed
-         }}
+        last_state =
+          {:on_break, iterations_elapsed,
+           %SessionConfig{
+             text_channel: text_channel,
+             voice_channel: voice_channel,
+             cycles_to_run: iterations_elapsed
+           }}
       ) do
     announce_end(text_channel, voice_channel)
-    clean_up_voice(config[:voice_channel])
-    Process.exit(:normal)
+    {:stop, :cycles_finished, last_state}
   end
 
   def handle_cast(
@@ -34,7 +45,7 @@ defmodule Bobochacha.SessionProcess do
       ) do
     ping_myself_after(minutes_for_work)
     announce_work(text_channel, voice_channel, minutes_for_work)
-    {:working, iterations_elapsed + 1, config}
+    {:no_reply, {:working, iterations_elapsed + 1, config}}
   end
 
   def handle_cast(
@@ -57,7 +68,7 @@ defmodule Bobochacha.SessionProcess do
         announce_small_break(text_channel, voice_channel, smol_brek)
     end
 
-    {:on_break, iterations_elapsed, config}
+    {:no_reply, {:on_break, iterations_elapsed, config}}
   end
 
   defp ping_myself_after(mins), do: Process.send_after(self(), :timer, :timer.minutes(mins))
