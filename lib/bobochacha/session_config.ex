@@ -1,7 +1,9 @@
 defmodule Bobochacha.SessionConfig do
-  @enforce_keys [:text_channel, :voice_channel]
+  @enforce_keys [:guild_id, :creator, :text_channel, :voice_channel]
 
   defstruct [
+    :guild_id,
+    :creator,
     :text_channel,
     :voice_channel,
     cycles_to_run: 12,

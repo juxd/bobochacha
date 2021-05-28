@@ -3,8 +3,8 @@ defmodule Bobochacha.GuildRegistry do
     Registry.start_link(keys: :unique, name: __MODULE__)
   end
 
-  def via_tuple(guild_id, session_meta \\ %{}) do
-    {:via, Registry, {__MODULE__, guild_id, session_meta}}
+  def via_tuple(session_config) do
+    {:via, Registry, {__MODULE__, session_config.guild_id, session_config}}
   end
 
   def child_spec(_) do

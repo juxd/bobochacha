@@ -2,6 +2,7 @@ defmodule SessionProcessTest do
   alias Bobochacha.SessionProcess
   alias Bobochacha.SessionConfig
   use ExUnit.Case, async: true
+  @dummy_user_id 69
   @dummy_guild_id 69_420
 
   setup do
@@ -11,8 +12,13 @@ defmodule SessionProcessTest do
       session_process:
         start_supervised!(
           {SessionProcess,
-           {%SessionConfig{text_channel: nil, voice_channel: nil, cycles_to_run: 2},
-            @dummy_guild_id}}
+           %SessionConfig{
+             creator: @dummy_user_id,
+             guild_id: @dummy_guild_id,
+             text_channel: nil,
+             voice_channel: nil,
+             cycles_to_run: 2
+           }}
         )
     }
   end
