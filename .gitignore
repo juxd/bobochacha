@@ -25,3 +25,6 @@ bobochacha-*.tar
 
 # Temporary files for e.g. tests
 /tmp
+
+# config file
+/config/config.exs

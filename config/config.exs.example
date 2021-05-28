@@ -1,0 +1,5 @@
+Config.config(:nostrum,
+  # The token of your bot as a string
+  token: "insert token here",
+  num_shards: :auto
+)
