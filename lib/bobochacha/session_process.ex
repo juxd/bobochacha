@@ -3,6 +3,7 @@ defmodule Bobochacha.SessionProcess do
 
   alias Bobochacha.SessionConfig
   alias Nostrum.Voice
+  require Logger
 
   def start_link(session_config) do
     GenServer.start_link(__MODULE__, session_config,
@@ -18,14 +19,14 @@ defmodule Bobochacha.SessionProcess do
   end
 
   @impl GenServer
-  def terminate(:normal, {:on_break, _, session_config}),
-    do: clean_up(session_config)
-
-  @impl GenServer
   def handle_continue(:finish_init, state) do
     ping_myself_after(0)
     {:noreply, state}
   end
+
+  @impl GenServer
+  def terminate(:normal, {_, _, session_config}),
+    do: clean_up(session_config)
 
   @impl GenServer
   def handle_cast(
@@ -36,40 +37,59 @@ defmodule Bobochacha.SessionProcess do
              cycles_to_run: iterations_elapsed
            }}
       ) do
-    announce_end(session_config)
-    {:stop, :normal, last_state}
+    log_error_or_return_if_ok alert(session_config, "Pomo session finished!"), last_state do
+      {:stop, :normal, last_state}
+    end
   end
 
   @impl GenServer
   def handle_cast(
         :timer,
-        {:on_break, iterations_elapsed, session_config}
+        last_state = {:on_break, iterations_elapsed, session_config}
       ) do
     ping_myself_after(session_config.minutes_for_work)
-    announce_work(session_config)
-    {:noreply, {:working, iterations_elapsed + 1, session_config}}
+
+    log_error_or_return_if_ok alert(session_config, "Time for work!"), last_state do
+      {:noreply, {:working, iterations_elapsed + 1, session_config}}
+    end
   end
 
   @impl GenServer
   def handle_cast(
         :timer,
-        {:working, iterations_elapsed,
-         session_config = %SessionConfig{
-           minutes_for_big_break: big_brek,
-           minutes_for_small_break: smol_brek
-         }}
+        last_state =
+          {:working, iterations_elapsed,
+           session_config = %SessionConfig{
+             minutes_for_big_break: big_brek,
+             minutes_for_small_break: smol_brek
+           }}
       ) do
     cond do
       rem(iterations_elapsed, 4) == 0 ->
         ping_myself_after(big_brek)
-        announce_big_break(session_config)
+
+        log_error_or_return_if_ok alert(session_config, "Time for a big break!"), last_state do
+          {:noreply, {:on_break, iterations_elapsed, session_config}}
+        end
 
       true ->
         ping_myself_after(smol_brek)
-        announce_small_break(session_config)
-    end
 
-    {:noreply, {:on_break, iterations_elapsed, session_config}}
+        log_error_or_return_if_ok alert(session_config, "Time for a small break!"), last_state do
+          {:noreply, {:on_break, iterations_elapsed, session_config}}
+        end
+    end
+  end
+
+  @impl GenServer
+  def handle_cast(:stop_session, last_state = {_, _, config}) do
+    log_error_or_return_if_ok alert(session_config, "K, bye!"), last_state do
+      {:stop, :normal, last_state}
+    end
+  end
+
+  def stop_session(session_process) do
+    GenServer.cast(session_process, :stop_session)
   end
 
   @impl GenServer
@@ -85,17 +105,40 @@ defmodule Bobochacha.SessionProcess do
     GenServer.cast(session_process, :timer)
   end
 
-  defp set_up_voice(_session_config), do: "urmom"
-  defp clean_up(_session_config), do: "urmom"
+  defp set_up_voice(%SessionConfig{guild_id: guild_id, voice_channel: voice_channel}) do
+    Voice.join_channel(guild_id, voice_channel)
+  end
+
+  defp clean_up(%SessionConfig{guild_id: guild_id}) do
+    Voice.leave_channel(guild_id)
+  end
 
   defp ping_myself_after(mins), do: Process.send_after(self(), :timer, :timer.minutes(mins))
 
-  defp announce_end(_session_config), do: "byebye"
-  defp announce_work(_session_config), do: "workwork"
+  defp alert(config, message) do
+    if Voice.ready?(config.guild_id) do
+      with {:ok, _msg} <- Api.create_message(config.text_channel, message) do
+        Voice.play(
+          config.guild_id,
+          File.read!(Application.fetch_env!(:bobochacha, :alert_file_path)),
+          :pipe
+        )
+      end
+    else
+      {:error, "not in voice channel"}
+    end
+  end
 
-  defp announce_small_break(_session_config),
-    do: "smolbrek"
+  defmacrop log_error_or_return_if_ok(cond_, last_state, do: expr) do
+    quote do
+      case unquote(cond_) do
+        :ok ->
+          unquote(expr)
 
-  defp announce_big_break(_session_config),
-    do: "bigbrek"
+        {:error, error_msg} ->
+          Logger.error("Error when trying to end session: #{inspect(error_msg)}")
+          {:stop, :error, unquote(last_state)}
+      end
+    end
+  end
 end

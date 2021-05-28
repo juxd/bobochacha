@@ -3,3 +3,7 @@ Config.config(:nostrum,
   token: "insert token here",
   num_shards: :auto
 )
+
+Config.config(:bobochacha,
+  alert_file_path: "sounds/alert.ogg"
+)
