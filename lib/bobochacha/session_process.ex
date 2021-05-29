@@ -14,7 +14,7 @@ defmodule Bobochacha.SessionProcess do
 
   @impl GenServer
   def init(session_config) do
-    :ok = set_up_voice(session_config)
+    set_up_voice(session_config)
     # This initial timer signal would kick off the pomo timer.
     Logger.info("Session just initialised in #{session_config.guild_id}")
     {:ok, {:on_break, 0, session_config}, {:continue, :finish_init}}
@@ -134,7 +134,7 @@ defmodule Bobochacha.SessionProcess do
   end
 
   def tick_timer_for_testing(session_process) do
-    GenServer.cast(session_process, :timer)
+    send(session_process, :timer)
   end
 
   defp set_up_voice(%SessionConfig{guild_id: guild_id, voice_channel: voice_channel}) do
