@@ -3,6 +3,7 @@ defmodule Bobochacha.SessionProcess do
 
   alias Bobochacha.SessionConfig
   alias Nostrum.Voice
+  alias Nostrum.Api
   require Logger
 
   def start_link(session_config) do
@@ -12,38 +13,65 @@ defmodule Bobochacha.SessionProcess do
   end
 
   @impl GenServer
-  def init(config) do
-    set_up_voice(config)
+  def init(session_config) do
+    :ok = set_up_voice(session_config)
     # This initial timer signal would kick off the pomo timer.
-    {:ok, {:on_break, 0, config}, {:continue, :finish_init}}
+    Logger.info("Session just initialised in #{session_config.guild_id}")
+    {:ok, {:on_break, 0, session_config}, {:continue, :finish_init}}
+  end
+
+  defp wait_for_voice_connected(session_config) do
+    if Voice.ready?(session_config.guild_id) do
+      nil
+    else
+      wait_for_voice_connected(session_config)
+    end
   end
 
   @impl GenServer
-  def handle_continue(:finish_init, state) do
+  def handle_continue(:finish_init, state = {_, _, session_config}) do
+    wait_for_voice_connected(session_config)
     ping_myself_after(0)
     {:noreply, state}
   end
 
   @impl GenServer
-  def terminate(:normal, {_, _, session_config}),
+  def terminate(_, {_, _, session_config}),
     do: clean_up(session_config)
 
+  defmacrop log_error_or_return_if_ok(cond_, last_state, do: expr) do
+    quote do
+      case unquote(cond_) do
+        :ok ->
+          unquote(expr)
+
+        {:error, error_msg} ->
+          Logger.error("Error in session: #{inspect(error_msg)}")
+
+          {:stop, :error, unquote(last_state)}
+      end
+    end
+  end
+
   @impl GenServer
-  def handle_cast(
+  def handle_info(
         :timer,
         last_state =
           {:on_break, iterations_elapsed,
            session_config = %SessionConfig{
+             guild_id: guild_id,
              cycles_to_run: iterations_elapsed
            }}
       ) do
+    Logger.info("Session ended for #{guild_id}")
+
     log_error_or_return_if_ok alert(session_config, "Pomo session finished!"), last_state do
       {:stop, :normal, last_state}
     end
   end
 
   @impl GenServer
-  def handle_cast(
+  def handle_info(
         :timer,
         last_state = {:on_break, iterations_elapsed, session_config}
       ) do
@@ -55,7 +83,7 @@ defmodule Bobochacha.SessionProcess do
   end
 
   @impl GenServer
-  def handle_cast(
+  def handle_info(
         :timer,
         last_state =
           {:working, iterations_elapsed,
@@ -64,25 +92,29 @@ defmodule Bobochacha.SessionProcess do
              minutes_for_small_break: smol_brek
            }}
       ) do
-    cond do
-      rem(iterations_elapsed, 4) == 0 ->
-        ping_myself_after(big_brek)
+    break_size =
+      cond do
+        rem(iterations_elapsed, 4) == 0 ->
+          ping_myself_after(big_brek)
+          "big"
 
-        log_error_or_return_if_ok alert(session_config, "Time for a big break!"), last_state do
-          {:noreply, {:on_break, iterations_elapsed, session_config}}
-        end
+        true ->
+          ping_myself_after(smol_brek)
+          "small"
+      end
 
-      true ->
-        ping_myself_after(smol_brek)
-
-        log_error_or_return_if_ok alert(session_config, "Time for a small break!"), last_state do
-          {:noreply, {:on_break, iterations_elapsed, session_config}}
-        end
+    log_error_or_return_if_ok alert(session_config, "Time for a #{break_size} break!"),
+                              last_state do
+      {:noreply, {:on_break, iterations_elapsed, session_config}}
     end
   end
 
   @impl GenServer
-  def handle_cast(:stop_session, last_state = {_, _, config}) do
+  def handle_cast(:stop_session, last_state = {_, _, session_config}) do
+    Logger.info(
+      "early termination request for session running in guild #{session_config.guild_id}"
+    )
+
     log_error_or_return_if_ok alert(session_config, "K, bye!"), last_state do
       {:stop, :normal, last_state}
     end
@@ -126,19 +158,6 @@ defmodule Bobochacha.SessionProcess do
       end
     else
       {:error, "not in voice channel"}
-    end
-  end
-
-  defmacrop log_error_or_return_if_ok(cond_, last_state, do: expr) do
-    quote do
-      case unquote(cond_) do
-        :ok ->
-          unquote(expr)
-
-        {:error, error_msg} ->
-          Logger.error("Error when trying to end session: #{inspect(error_msg)}")
-          {:stop, :error, unquote(last_state)}
-      end
     end
   end
 end
